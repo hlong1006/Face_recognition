@@ -4,7 +4,7 @@ class CNN(nn.Module):
     def __init__(self , num_classes ) :
         super(CNN , self).__init__()
         #B1 : feature
-        self.conv1 = nn.Conv2d(1 , 32 , kernel_size = 3 , padding = 1 )
+        self.conv1 = nn.Conv2d(3 , 32 , kernel_size = 3 , padding = 1 )
         self.pool = nn.MaxPool2d(2 , 2)
 
         #B2 : feature
