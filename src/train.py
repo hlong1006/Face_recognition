@@ -2,10 +2,8 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
-
-from .model import CNN 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BATCH_SIZE = 32
@@ -15,44 +13,40 @@ NUM_CLASSES = 64
 
 def run_train(data_root='data'):
     data_transform = transforms.Compose([
-        transforms.Resize((64, 64)),    
-        transforms.ToTensor(),           
-       
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) 
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(15),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
- 
-    train_dir = os.path.join(data_root, 'train')
-    val_dir = os.path.join(data_root, 'val') 
-    if not os.path.exists(val_dir):
-        val_dir = os.path.join(data_root, 'test')
-
-   
+    train_dir = os.path.join(data_root, 'image')
     if not os.path.exists(train_dir):
-        print(f"Error: Không tìm thấy thư mục '{train_dir}")
-        return
+        train_dir = os.path.join(data_root, 'image')
+    if not os.path.exists(train_dir):
+        train_dir = data_root 
 
-    train_dataset = datasets.ImageFolder(root=train_dir, transform=data_transform)
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-
-    has_val = os.path.exists(val_dir)
-    if has_val:
-        val_dataset = datasets.ImageFolder(root=val_dir, transform=data_transform)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    else:
-        print(f"Warning: Không tìm thấy thư mục '{val_dir}'. Training only, no validation.")
-        val_loader = []
-
-    print(f"Tìm thấy {len(train_dataset)} ảnh train thuộc {len(train_dataset.classes)} lớp: {train_dataset.classes}")
-
+    print(f"Đang đọc dữ liệu từ: {train_dir}")
+    full_dataset = datasets.ImageFolder(root=train_dir, transform=data_transform)
+    
    
+    total_size = len(full_dataset)
+    train_size = int(0.8 * total_size) 
+    val_size = total_size - train_size 
+    
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+    print(f"Đã chia: {train_size} ảnh Train | {val_size} ảnh Validation")
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+
     model = CNN(num_classes=NUM_CLASSES).to(DEVICE)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     
     best_val_acc = 0.0
-    best_train_acc = 0.0
 
+    # 5. Vòng lặp huấn luyện
     for epoch in range(NUM_EPOCHS):
         model.train()
         running_loss = 0.0
@@ -80,40 +74,34 @@ def run_train(data_root='data'):
 
         train_acc = 100.0 * correct_train / total_train if total_train else 0.0
         avg_train_loss = running_loss / len(train_loader) if len(train_loader) else 0.0
-      
+        
+        # Đánh giá trên tập Validation
         model.eval()
         correct_val = 0
         total_val = 0
         val_loss = 0.0
         
-        if has_val:
-            with torch.no_grad():
-                for images, labels in val_loader:
-                    images, labels = images.to(DEVICE), labels.to(DEVICE)
-                    outputs = model(images)
-                    loss = criterion(outputs, labels)
-                    val_loss += loss.item()
-                    _, predicted = torch.max(outputs.data, 1)
-                    total_val += labels.size(0)
-                    correct_val += (predicted == labels).sum().item()
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(DEVICE), labels.to(DEVICE)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                total_val += labels.size(0)
+                correct_val += (predicted == labels).sum().item()
 
-            val_acc = 100.0 * correct_val / total_val if total_val else 0.0
-            avg_val_loss = val_loss / len(val_loader) if len(val_loader) else 0.0
+        val_acc = 100.0 * correct_val / total_val if total_val else 0.0
+        avg_val_loss = val_loss / len(val_loader) if len(val_loader) else 0.0
 
-        log = f"Epoch [{epoch+1}/{NUM_EPOCHS}] Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.2f}%"
-        if has_val:
-            log += f" | Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc:.2f}%"
+        log = (f"Epoch [{epoch+1}/{NUM_EPOCHS}] Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.2f}% "
+               f"| Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc:.2f}%")
         print(log)
-        to_save = (has_val and val_acc > best_val_acc) or (not has_val and train_acc > best_train_acc)
-        if has_val and val_acc > best_val_acc:
-            best_val_acc = val_acc
-        if not has_val and train_acc > best_train_acc:
-            best_train_acc = train_acc
 
-        if to_save:
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             os.makedirs('models', exist_ok=True)
             torch.save(model.state_dict(), 'models/best_model.pth')
             print("--> Saved best model!")
 
     print("Training finished!")
-
