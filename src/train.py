@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
+from src.model import CNN
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BATCH_SIZE = 32
@@ -46,7 +47,7 @@ def run_train(data_root='data'):
     
     best_val_acc = 0.0
 
-    # 5. Vòng lặp huấn luyện
+
     for epoch in range(NUM_EPOCHS):
         model.train()
         running_loss = 0.0
@@ -75,7 +76,6 @@ def run_train(data_root='data'):
         train_acc = 100.0 * correct_train / total_train if total_train else 0.0
         avg_train_loss = running_loss / len(train_loader) if len(train_loader) else 0.0
         
-        # Đánh giá trên tập Validation
         model.eval()
         correct_val = 0
         total_val = 0
